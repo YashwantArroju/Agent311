@@ -1,0 +1,33 @@
+# config/categories.yaml
+# Each entry defines: a machine key, phrases to detect in free text,
+# and which fields to collect for that category.
+
+- key: pothole
+  detect: ["pothole", "road hole", "street crater", "sinkhole"]
+  required: ["Location (address or landmark)", "Description", "Photo (optional)"]
+  dept: Public Works
+
+- key: streetlight
+  detect: ["streetlight", "street light", "light pole", "lamp post", "area light"]
+  required: ["Nearest address/intersection", "Pole number (if visible)", "Photo (optional)"]
+  dept: Transportation
+
+- key: missed_trash
+  detect: ["missed trash", "garbage not collected", "bin still full"]
+  required: ["Address", "Pickup day", "Bin type (trash/recycle)"]
+  dept: Sanitation
+
+- key: graffiti
+  detect: ["graffiti", "tagging", "spray paint"]
+  required: ["Address", "Surface/type", "Photo if possible"]
+  dept: Public Works
+
+- key: noise
+  detect: ["noise", "loud party", "construction noise", "noise complaint"]
+  required: ["Address", "Dates/times", "Type of noise"]
+  dept: Code Enforcement
+
+- key: bulk_pickup
+  detect: ["bulk pickup", "bulky item", "sofa", "mattress", "appliance"]
+  required: ["Address", "Item type", "Quantity"]
+  dept: Sanitation

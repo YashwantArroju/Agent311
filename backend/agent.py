@@ -1,22 +1,83 @@
 # backend/agent.py
-import os, re, json, requests
+
+# --- (optional) silence the LangChain agent deprecation banner ---
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message=r".*LangChain agents will continue to be supported.*"
+)
+
+# ===================== Imports =====================
+import os, re, requests, yaml, pathlib
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain.tools import tool
 from langchain.agents import initialize_agent, AgentType
 from langchain.schema import SystemMessage
 
+# ===================== Env / Config =====================
 load_dotenv()
+API_BASE = os.getenv("API_BASE", "http://localhost:8011")
 
-API_BASE = "http://localhost:8011"
- # tools server
+# ---------- Load categories from YAML (no hard-coded fallback) ----------
+ROOT = pathlib.Path(__file__).resolve().parents[1]  # project root
+CATS_PATH = ROOT / "config" / "categories.yaml"
 
-# ---- emergency detection ----
+with open(CATS_PATH, "r", encoding="utf-8") as f:
+    _raw = yaml.safe_load(f) or []
+
+# Normalize YAML rows -> CATEGORIES: [{key, detect, required_fields}]
+CATEGORIES = []
+for row in _raw:
+    key = row.get("key")
+    if not key:
+        continue
+    detect = row.get("detect") or row.get("examples") or []
+    detect = [t for t in detect if isinstance(t, str) and t.strip()]
+    req = row.get("required_fields") or row.get("required") or []
+    CATEGORIES.append({"key": key, "detect": detect, "required_fields": req})
+
+if not CATEGORIES:
+    # Force YAML presence since we removed hard-coded categories
+    raise RuntimeError("config/categories.yaml is missing or empty.")
+
+# ---------- Build alias map and boundary-aware patterns from YAML ----------
+CATEGORY_ALIASES = {row["key"]: list(dict.fromkeys(row.get("detect", []))) for row in CATEGORIES}
+
+def _compile_patterns(aliases: dict[str, list[str]]):
+    compiled: dict[str, list[re.Pattern]] = {}
+    for key, terms in aliases.items():
+        pats = []
+        for t in terms:
+            if t:
+                # word-boundary, case-insensitive; escape special chars
+                pats.append(re.compile(rf"\b{re.escape(t.lower())}\b", re.IGNORECASE))
+        compiled[key] = pats
+    return compiled
+
+TERM_PATTERNS = _compile_patterns(CATEGORY_ALIASES)
+
+def _guess_category(text: str) -> str | None:
+    """
+    YAML-driven category guess (prefers the longest matching term).
+    """
+    low = (text or "").lower()
+    best_key, best_len = None, 0
+    for key, patterns in TERM_PATTERNS.items():
+        for p in patterns:
+            m = p.search(low)
+            if m:
+                L = len(m.group(0))
+                if L > best_len:
+                    best_key, best_len = key, L
+    return best_key
+
+# ===================== Emergency detection =====================
 EMERGENCY_REGEX = r"(heart attack|gun|shots fired|fire in (my|the)|unconscious|not breathing|domestic violence|break[- ]?in|armed|stabbed|car crash with injuries)"
 def is_emergency(text: str) -> bool:
     return bool(re.search(EMERGENCY_REGEX, text or "", re.IGNORECASE))
 
-# ---- tools that call your FastAPI endpoints ----
+# ===================== Tools (FastAPI) =====================
 @tool
 def create_ticket_tool(category: str, description: str, address: str = "", contact_email: str = "") -> str:
     """Create a city service ticket. Return JSON with ticket_id/status/eta_days."""
@@ -25,7 +86,7 @@ def create_ticket_tool(category: str, description: str, address: str = "", conta
         "description": description,
         "address": address,
         "contact_email": contact_email,
-        "contact_phone": "",  # FORCE email-only
+        "contact_phone": "",  # email-only
     }
     r = requests.post(f"{API_BASE}/create_ticket", json=payload, timeout=10)
     return r.text
@@ -42,7 +103,7 @@ def search_kb_tool(query: str) -> str:
     r = requests.post(f"{API_BASE}/search_kb", json={"query": query}, timeout=10)
     return r.text
 
-# ---- stricter, generic prompt (EMAIL ONLY) ----
+# ===================== System Prompt =====================
 SYSTEM_PROMPT = """
 You are CityAssist, a generic 311-style non-emergency assistant.
 
@@ -84,67 +145,43 @@ def build_agent():
     )
     return agent
 
-# ---------- fast path helpers (force-create when fields are present) ----------
+# ===================== Fast-path helpers (unchanged) =====================
 TICKET_ID_RE = r"\b[a-f0-9]{8}\b"
 EMAIL_RE = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
-
-CATEGORY_ALIASES = {
-    "pothole": ["pothole", "road hole", "street crater"],
-    "streetlight": ["streetlight", "street light", "light pole", "lamp post"],
-    "missed_trash": ["missed trash", "garbage not collected", "bin still full"],
-    "noise": ["noise", "noise pollution", "loud party", "construction noise"],
-    "bulk_pickup": ["bulk pickup", "sofa", "mattress", "appliance"],
-    "graffiti": ["graffiti", "tagging", "spray paint"],
-}
-
-def _guess_category(text: str):
-    low = (text or "").lower()
-    for key, terms in CATEGORY_ALIASES.items():
-        if any(t in low for t in terms):
-            return key
-    return None
 
 def _find_labeled(labels, text: str):
     # supports "Category:", "Description:", "Location:", "Contact:", "Email:"
     if isinstance(labels, str):
         labels = [labels]
     pat = r"(?:" + "|".join([re.escape(l) for l in labels]) + r")\s*[:\-]\s*(.+?)(?=$|Category:|Description:|Location:|Contact:|Email:)"
-    m = re.search(pat, text, re.I | re.S)
+    m = re.search(pat, text or "", re.I | re.S)
     return m.group(1).strip() if m else None
 
 def _extract_report_fields(text: str):
-    # Allow both "Contact:" and "Email:" labels but only accept email value
+    # Use label if present, otherwise YAML-based guesser
     category = _find_labeled("Category", text) or _guess_category(text)
     description = _find_labeled("Description", text)
-    location = _find_labeled("Location", text)
-    email = _find_labeled("Email", text)
+    location   = _find_labeled("Location", text)
+    email      = _find_labeled("Email", text)
 
-    # Always run regex to validate / extract email
-    candidate = email or text
+    # validate/extract email anywhere in the text
+    candidate = email or (text or "")
     m = re.search(EMAIL_RE, candidate)
     email = m.group(0) if m else None
 
-
-    # reasonable fallback for description
+    # fallback description: first sentence
     if not description:
-        s = re.split(r"[.!?\n]", text.strip())[0]
+        s = re.split(r"[.!?\n]", (text or "").strip())[0]
         description = s[:160] if s else None
 
     return category, description, location, email
 
 def run_or_force(agent, user_input: str, prev_user: str | None = None, debug: bool = False) -> str:
-    """
-    - If emergency -> 911.
-    - If 8-char ticket id present -> get status immediately.
-    - Try to extract Category+Description+Location+Email from the CURRENT message.
-      If missing email but this message is only an email, merge with PREVIOUS user message and try again.
-    - If still incomplete, fall back to the agent.
-    """
     # emergency
     if is_emergency(user_input):
         return "This sounds like an emergency. Please call **911** immediately."
 
-    # ticket status (fast)
+    # fast status path
     m = re.search(TICKET_ID_RE, (user_input or "").lower())
     if m:
         tid = m.group(0)
@@ -160,24 +197,19 @@ def run_or_force(agent, user_input: str, prev_user: str | None = None, debug: bo
         except Exception:
             pass
 
-    # report extract from current message
+    # extract from current message
     cat, desc, loc, email = _extract_report_fields(user_input)
 
-    # if this message is basically "email only", try merging with previous user turn
+    # if message is basically "email only", try merging with previous user turn
     if (not (cat and desc and loc) and email and prev_user):
         merged = (prev_user or "") + "\n" + (user_input or "")
         cat2, desc2, loc2, email2 = _extract_report_fields(merged)
         if cat2 and desc2 and loc2 and email2:
             cat, desc, loc, email = cat2, desc2, loc2, email2
 
-    # create ticket if we have all four pieces (EMAIL ONLY)
+    # create ticket if we have all four pieces
     if cat and desc and loc and email:
-        payload = {
-            "category": cat,
-            "description": desc,
-            "address": loc,
-            "contact_email": email,
-        }
+        payload = {"category": cat, "description": desc, "address": loc, "contact_email": email}
         try:
             r = requests.post(f"{API_BASE}/create_ticket", json=payload, timeout=10)
             data = r.json()
@@ -188,7 +220,7 @@ def run_or_force(agent, user_input: str, prev_user: str | None = None, debug: bo
         except Exception:
             pass  # let the agent try
 
-    # otherwise, let the agent drive (but it now knows: email only)
+    # otherwise, let the agent drive
     return (f"{'🌀 agent — ' if debug else ''}" + agent.run(user_input))
 
 # optional local CLI
