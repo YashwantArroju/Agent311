@@ -1,4 +1,7 @@
 # backend/agent.py
+# ============================================================
+# CityAssist 311 agent — LLM-only (let the model "think" more)
+# ============================================================
 
 # --- (optional) silence the LangChain agent deprecation banner ---
 import warnings
@@ -8,8 +11,13 @@ warnings.filterwarnings(
 )
 
 # ===================== Imports =====================
-import os, re, requests, yaml, pathlib
+import os
+import re
+import requests
+import yaml
+import pathlib
 from dotenv import load_dotenv
+
 from langchain_openai import ChatOpenAI
 from langchain.tools import tool
 from langchain.agents import initialize_agent, AgentType
@@ -19,58 +27,26 @@ from langchain.schema import SystemMessage
 load_dotenv()
 API_BASE = os.getenv("API_BASE", "http://localhost:8011")
 
-# ---------- Load categories from YAML (no hard-coded fallback) ----------
+# ---------- Load categories from YAML (read once, no code-side classification) ----------
 ROOT = pathlib.Path(__file__).resolve().parents[1]  # project root
 CATS_PATH = ROOT / "config" / "categories.yaml"
+try:
+    CATS_YAML_TEXT = CATS_PATH.read_text(encoding="utf-8")
+except FileNotFoundError as e:
+    raise RuntimeError(
+        f"Missing categories file at {CATS_PATH}. "
+        "Create config/categories.yaml (see examples we discussed)."
+    ) from e
 
-with open(CATS_PATH, "r", encoding="utf-8") as f:
-    _raw = yaml.safe_load(f) or []
-
-# Normalize YAML rows -> CATEGORIES: [{key, detect, required_fields}]
-CATEGORIES = []
-for row in _raw:
-    key = row.get("key")
-    if not key:
-        continue
-    detect = row.get("detect") or row.get("examples") or []
-    detect = [t for t in detect if isinstance(t, str) and t.strip()]
-    req = row.get("required_fields") or row.get("required") or []
-    CATEGORIES.append({"key": key, "detect": detect, "required_fields": req})
-
-if not CATEGORIES:
-    # Force YAML presence since we removed hard-coded categories
-    raise RuntimeError("config/categories.yaml is missing or empty.")
-
-# ---------- Build alias map and boundary-aware patterns from YAML ----------
-CATEGORY_ALIASES = {row["key"]: list(dict.fromkeys(row.get("detect", []))) for row in CATEGORIES}
-
-def _compile_patterns(aliases: dict[str, list[str]]):
-    compiled: dict[str, list[re.Pattern]] = {}
-    for key, terms in aliases.items():
-        pats = []
-        for t in terms:
-            if t:
-                # word-boundary, case-insensitive; escape special chars
-                pats.append(re.compile(rf"\b{re.escape(t.lower())}\b", re.IGNORECASE))
-        compiled[key] = pats
-    return compiled
-
-TERM_PATTERNS = _compile_patterns(CATEGORY_ALIASES)
-
-def _guess_category(text: str) -> str | None:
-    """
-    YAML-driven category guess (prefers the longest matching term).
-    """
-    low = (text or "").lower()
-    best_key, best_len = None, 0
-    for key, patterns in TERM_PATTERNS.items():
-        for p in patterns:
-            m = p.search(low)
-            if m:
-                L = len(m.group(0))
-                if L > best_len:
-                    best_key, best_len = key, L
-    return best_key
+# (Optional) tiny validation maps — useful only to sanity-check LLM outputs later.
+# They don't classify; they just tell you what keys exist and what's required.
+#_CATS = yaml.safe_load(CATS_YAML_TEXT) or []
+#CATEGORY_KEYS = {row.get("key") for row in _CATS if isinstance(row, dict) and row.get("key")}
+#REQUIRED_BY_KEY = {
+#    row["key"]: (row.get("required_fields") or row.get("required") or [])
+#    for row in _CATS
+#    if isinstance(row, dict) and row.get("key")
+#}
 
 # ===================== Emergency detection =====================
 EMERGENCY_REGEX = r"(heart attack|gun|shots fired|fire in (my|the)|unconscious|not breathing|domestic violence|break[- ]?in|armed|stabbed|car crash with injuries)"
@@ -80,13 +56,14 @@ def is_emergency(text: str) -> bool:
 # ===================== Tools (FastAPI) =====================
 @tool
 def create_ticket_tool(category: str, description: str, address: str = "", contact_email: str = "") -> str:
-    """Create a city service ticket. Return JSON with ticket_id/status/eta_days."""
+    """Create a city service ticket. CALL THIS IMMEDIATELY once you have all four fields:
+    category, description, address, contact_email. Do not ask for any other fields. Returns JSON with ticket_id/status/eta_days."""
     payload = {
         "category": category,
         "description": description,
         "address": address,
         "contact_email": contact_email,
-        "contact_phone": "",  # email-only
+        #"contact_phone": "",  # email-only
     }
     r = requests.post(f"{API_BASE}/create_ticket", json=payload, timeout=10)
     return r.text
@@ -103,8 +80,8 @@ def search_kb_tool(query: str) -> str:
     r = requests.post(f"{API_BASE}/search_kb", json={"query": query}, timeout=10)
     return r.text
 
-# ===================== System Prompt =====================
-SYSTEM_PROMPT = """
+# ===================== System Prompt (includes YAML) =====================
+SYSTEM_PROMPT = f"""
 You are CityAssist, a generic 311-style non-emergency assistant.
 
 INTENTS → TOOLS
@@ -113,7 +90,7 @@ INTENTS → TOOLS
 - Ask about city services → call search_kb_tool
 
 REPORTING (EMAIL ONLY)
-- Required to create a ticket: Category, Description, Location (address or landmark), and Contact Email.
+- To create ANY ticket, collect exactly these four fields: Category, Description, Location (address or landmark), and Contact Email.
 - Location can be ANY location string; do not block on perfect addresses.
 - If the user has provided all four, you MUST call create_ticket_tool. Do not ask for a phone number.
 - If something is missing, ask ONLY for the missing pieces in one brief question (prioritize asking for the email if it's missing).
@@ -125,12 +102,23 @@ STATUS
 
 KB
 - For service questions (missed trash, pothole, streetlight, noise etc.), call search_kb_tool.
-- If no answer is found, say so and offer to create a ticket.
+- Give a concise, general answer. Then IMMEDIATELY offer to create a ticket.
+- If the user agrees (e.g., “yes”, “please do”, “create it”), PROCEED to collect ONLY the four fields and CALL create_ticket_tool. Do NOT re-ask already provided info. Do NOT loop.
 
 GUARDRAILS
 - If the message suggests an emergency, say: "Call 911 now." Do not call any tools.
 - Be concise, friendly, and action-oriented. Never ask for a phone number.
+- Avoid repeating the same follow-up question more than once. If the user doesn’t provide a missing field after one ask, explain why it’s needed and stop.
+- Do not invent data. If a required field is missing, ask for it directly.
+
+You have access to the city's service taxonomy below. Use it to classify user requests and to know which fields to collect.
+
+CATEGORIES_YAML:
+---
+{CATS_YAML_TEXT}
+---
 """
+
 
 def build_agent():
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
@@ -145,22 +133,35 @@ def build_agent():
     )
     return agent
 
-# ===================== Fast-path helpers (unchanged) =====================
-TICKET_ID_RE = r"\b[a-f0-9]{8}\b"
-EMAIL_RE = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+# ======================================================================
+# (NOT NEEDED IN LLM-ONLY MODE)
+# ----------------------------------------------------------------------
+# The code below was the "fast-path" deterministic helper. It tried to:
+# - parse ticket IDs from text and immediately call get_ticket_status_tool
+# - extract Category/Description/Location/Email via regex and create a ticket
+# You asked to let the LLM do the thinking instead, so this stays commented.
+# If you ever want to re-enable it, uncomment and call run_or_force(...) from
+# your Streamlit app instead of agent.run(...).
+# ======================================================================
+
+"""
+# ---------- fast path helpers (deterministic; usually not needed now) ----------
+TICKET_ID_RE = r"\\b[a-f0-9]{8}\\b"
+EMAIL_RE = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
 
 def _find_labeled(labels, text: str):
-    # supports "Category:", "Description:", "Location:", "Contact:", "Email:"
+    # supports "Category:", "Description:", "Location:", "Email:"
+    import re
     if isinstance(labels, str):
         labels = [labels]
-    pat = r"(?:" + "|".join([re.escape(l) for l in labels]) + r")\s*[:\-]\s*(.+?)(?=$|Category:|Description:|Location:|Contact:|Email:)"
+    pat = r"(?:" + "|".join([re.escape(l) for l in labels]) + r")\\s*[:\\-]\\s*(.+?)(?=$|Category:|Description:|Location:|Email:)"
     m = re.search(pat, text or "", re.I | re.S)
     return m.group(1).strip() if m else None
 
 def _extract_report_fields(text: str):
-    # Use label if present, otherwise YAML-based guesser
-    category = _find_labeled("Category", text) or _guess_category(text)
-    description = _find_labeled("Description", text)
+    # NOTE: In the LLM-only flow we don't guess category here; the model does.
+    category   = _find_labeled("Category", text)
+    description= _find_labeled("Description", text)
     location   = _find_labeled("Location", text)
     email      = _find_labeled("Email", text)
 
@@ -171,7 +172,7 @@ def _extract_report_fields(text: str):
 
     # fallback description: first sentence
     if not description:
-        s = re.split(r"[.!?\n]", (text or "").strip())[0]
+        s = re.split(r"[.!?\\n]", (text or "").strip())[0]
         description = s[:160] if s else None
 
     return category, description, location, email
@@ -189,11 +190,11 @@ def run_or_force(agent, user_input: str, prev_user: str | None = None, debug: bo
             r = requests.post(f"{API_BASE}/get_ticket_status", json={"ticket_id": tid}, timeout=10)
             data = r.json()
             if "error" in data:
-                return (f"{'🟡 fast-path(status) — ' if debug else ''}"
+                return (f"{{'🟡 fast-path(status) — ' if debug else ''}}"
                         f"I couldn't find ticket **{tid}**. Please check the ID or create a new ticket.")
-            return (f"{'🟢 fast-path(status) — ' if debug else ''}"
-                    f"Status for **{data['ticket_id']}**: **{data['status']}** "
-                    f"(dept: {data.get('dept','N/A')}, ETA ~ {data.get('eta_days','?')} days).")
+            return (f"{{'🟢 fast-path(status) — ' if debug else ''}}"
+                    f"Status for **{{data['ticket_id']}}**: **{{data['status']}}** "
+                    f"(dept: {{data.get('dept','N/A')}}, ETA ~ {{data.get('eta_days','?')}} days).")
         except Exception:
             pass
 
@@ -202,7 +203,7 @@ def run_or_force(agent, user_input: str, prev_user: str | None = None, debug: bo
 
     # if message is basically "email only", try merging with previous user turn
     if (not (cat and desc and loc) and email and prev_user):
-        merged = (prev_user or "") + "\n" + (user_input or "")
+        merged = (prev_user or "") + "\\n" + (user_input or "")
         cat2, desc2, loc2, email2 = _extract_report_fields(merged)
         if cat2 and desc2 and loc2 and email2:
             cat, desc, loc, email = cat2, desc2, loc2, email2
@@ -214,18 +215,26 @@ def run_or_force(agent, user_input: str, prev_user: str | None = None, debug: bo
             r = requests.post(f"{API_BASE}/create_ticket", json=payload, timeout=10)
             data = r.json()
             if "ticket_id" in data:
-                return (f"{'🟢 fast-path(report) — ' if debug else ''}"
-                        f"Created ticket **{data['ticket_id']}** for **{cat}** at **{loc}**. "
-                        f"ETA ~ **{data['eta_days']} days**.")
+                return (f"{{'🟢 fast-path(report) — ' if debug else ''}}"
+                        f"Created ticket **{{data['ticket_id']}}** for **{{cat}}** at **{{loc}}**. "
+                        f"ETA ~ **{{data['eta_days']}} days**.")
         except Exception:
             pass  # let the agent try
 
     # otherwise, let the agent drive
-    return (f"{'🌀 agent — ' if debug else ''}" + agent.run(user_input))
+    return (f"{{'🌀 agent — ' if debug else ''}}" + agent.run(user_input))
+"""
 
-# optional local CLI
+# -------------- local CLI (optional) --------------
 if __name__ == "__main__":
     agent = build_agent()
+    print("LLM-only CityAssist agent. Type messages, Ctrl+C to exit.")
     while True:
-        text = input("User: ")
-        print(run_or_force(agent, text))
+        try:
+            text = input("You: ")
+        except (EOFError, KeyboardInterrupt):
+            break
+        if is_emergency(text):
+            print("Agent: This sounds like an emergency. Please call 911 immediately.")
+            continue
+        print("Agent:", agent.run(text))
