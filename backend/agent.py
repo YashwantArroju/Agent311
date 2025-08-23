@@ -42,6 +42,12 @@ def search_kb_tool(query: str) -> str:
     r = requests.post(f"{API_BASE}/search_kb", json={"query": query}, timeout=10)
     return r.text
 
+@tool
+def gmail_tool(subject: str, body: str, recipient: str) -> str:
+    """Send an email using Gmail service account impersonation."""
+    return send_email(subject, body, recipient)
+
+
 # ---- stricter, generic prompt (EMAIL ONLY) ----
 SYSTEM_PROMPT = """
 You are CityAssist, a generic 311-style non-emergency assistant.
