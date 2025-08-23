@@ -48,6 +48,8 @@ class Ticket(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     contact_email = Column(String, nullable=True)
     contact_phone = Column(String, nullable=True)
+    # Backend-editable note shown when user checks status
+    status_description = Column(Text, nullable=True)
 
     events = relationship("TicketEvent", back_populates="ticket", cascade="all, delete-orphan")
 
@@ -79,9 +81,11 @@ class CreateTicketResponse(BaseModel):
 class StatusRequest(BaseModel):
     ticket_id: str
 
+# Allow optional note when updating status
 class UpdateStatusRequest(BaseModel):
     ticket_id: str
     status: str
+    status_description: Optional[str] = None
 
 # ---------------- Helpers / CRUD ----------------
 def route_department(category: str) -> str:
@@ -96,6 +100,7 @@ def route_department(category: str) -> str:
     return mapping.get((category or "").lower(), "311 Intake")
 
 def init_db() -> None:
+    # Creates tables if they don't exist (on a NEW DB this includes status_description).
     Base.metadata.create_all(bind=engine)
 
 def create_ticket(
@@ -123,6 +128,7 @@ def create_ticket(
         updated_at=datetime.utcnow(),
         contact_email=contact_email,
         contact_phone=contact_phone,
+        # status_description intentionally left None at creation
     )
     db.add(t)
     db.commit()
@@ -137,13 +143,24 @@ def create_ticket(
 def get_ticket(db: Session, ticket_id: str) -> Ticket | None:
     return db.query(Ticket).filter(Ticket.id == ticket_id).first()
 
-def update_ticket_status(db: Session, ticket_id: str, status: str) -> Ticket | None:
+def update_ticket_status(db: Session, ticket_id: str, status: str, status_description: str | None = None) -> Ticket | None:
     t = get_ticket(db, ticket_id)
     if not t:
         return None
     t.status = status
+    if status_description is not None:
+        t.status_description = status_description
     t.updated_at = datetime.utcnow()
-    db.add(TicketEvent(ticket_id=ticket_id, event_type="status_changed", payload=json.dumps({"status": status})))
+
+    payload = {"status": status}
+    if status_description is not None:
+        payload["status_description"] = status_description
+
+    db.add(TicketEvent(
+        ticket_id=ticket_id,
+        event_type="status_changed",
+        payload=json.dumps(payload),
+    ))
     db.commit()
     db.refresh(t)
     return t

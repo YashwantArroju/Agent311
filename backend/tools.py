@@ -1,30 +1,10 @@
 # backend/tools.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-# from typing import Optional, List, Dict   # ⬅️ no longer needed for DB-backed version
-# from datetime import datetime             # ⬅️ no longer needed here
-# import uuid                               # ⬅️ no longer needed here
+from typing import Optional
+from datetime import datetime
 
 app = FastAPI(title="311 Tools (DB-backed)")
-
-# -------------------- OLD IN-MEMORY STORE (NOT USED) --------------------
-# TICKETS: Dict[str, Dict] = {}  # ⬅️ replaced by SQLite in db_core.py
-
-# class CreateTicketRequest(BaseModel):     # ⬅️ using canonical schemas from db_core.py
-#     category: str
-#     description: str
-#     address: Optional[str] = None
-#     lat: Optional[float] = None
-#     lon: Optional[float] = None
-#     contact_email: Optional[str] = None
-#     contact_phone: Optional[str] = None
-#     attachments: Optional[List[str]] = None
-#
-# class CreateTicketResponse(BaseModel):
-#     ticket_id: str
-#     status: str
-#     eta_days: int
-# -----------------------------------------------------------------------
 
 # -------------------- DB IMPORTS (single-file core) --------------------
 from .db_core import (
@@ -40,6 +20,15 @@ from .db_core import (
 
 # Create tables on import (simple for dev)
 init_db()
+
+# -------------------- Response models --------------------
+class StatusResponse(BaseModel):
+    ticket_id: str
+    status: str
+    status_description: Optional[str] = None
+    eta_days: int
+    dept: Optional[str] = None
+    updated_at: datetime
 
 # -------------------- Ticket endpoints --------------------
 @app.post("/create_ticket", response_model=CreateTicketResponse)
@@ -60,20 +49,23 @@ def create_ticket(req: CreateTicketRequest):
     finally:
         db.close()
 
-@app.post("/get_ticket_status")
+@app.post("/get_ticket_status", response_model=StatusResponse, response_model_exclude_none=True)
 def get_ticket_status(req: StatusRequest):
     db = SessionLocal()
     try:
         t = db_get_ticket(db, req.ticket_id)
         if not t:
             raise HTTPException(status_code=404, detail="Ticket not found")
+        # Only the fields in StatusResponse will be returned (others are ignored by response_model)
         return {
             "ticket_id": t.id,
             "status": t.status,
-            "dept": t.dept,
-            "created_at": t.created_at.isoformat(),
+            "status_description": t.status_description,  # <- note surfaces here
             "eta_days": t.eta_days,
-            # convenience extras
+            "dept": t.dept,
+            "updated_at": t.updated_at,
+            # extras (kept here for convenience; filtered out by response_model)
+            "created_at": t.created_at.isoformat(),
             "category": t.category,
             "address": t.address,
             "description": t.description,
@@ -86,10 +78,16 @@ def get_ticket_status(req: StatusRequest):
 def update_ticket_status(req: UpdateStatusRequest):
     db = SessionLocal()
     try:
-        t = db_update_ticket_status(db, req.ticket_id, req.status)
+        # Forward optional status_description to DB layer
+        t = db_update_ticket_status(db, req.ticket_id, req.status, req.status_description)
         if not t:
             raise HTTPException(status_code=404, detail="Ticket not found")
-        return {"ok": True, "ticket_id": t.id, "status": t.status}
+        return {
+            "ok": True,
+            "ticket_id": t.id,
+            "status": t.status,
+            "status_description": t.status_description,
+        }
     finally:
         db.close()
 
@@ -143,15 +141,3 @@ def search_kb(req: KBQuery):
         if item["q"] in q:
             return {"answer": item["a"], "source": "Generic FAQs"}
     return {"answer": None, "source": None}
-
-# -------------------- OLD ROUTER (NOT USED HERE) --------------------
-# def route_department(category: str) -> str:   # ⬅️ handled inside db_core.create_ticket
-#     mapping = {
-#         "pothole": "Public Works",
-#         "streetlight": "Transportation",
-#         "missed_trash": "Sanitation",
-#         "graffiti": "Public Works",
-#         "noise": "Code Enforcement",
-#         "bulk_pickup": "Sanitation",
-#     }
-#     return mapping.get((category or "").lower(), "311 Intake")
