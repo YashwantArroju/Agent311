@@ -3,6 +3,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from .email import send_ticket_created_email
+
 
 app = FastAPI(title="311 Tools (DB-backed)")
 
@@ -32,7 +35,7 @@ class StatusResponse(BaseModel):
 
 # -------------------- Ticket endpoints --------------------
 @app.post("/create_ticket", response_model=CreateTicketResponse)
-def create_ticket(req: CreateTicketRequest):
+def create_ticket(req: CreateTicketRequest, background: BackgroundTasks):
     db = SessionLocal()
     try:
         t = db_create_ticket(
@@ -45,6 +48,19 @@ def create_ticket(req: CreateTicketRequest):
             contact_email=req.contact_email,
             contact_phone=req.contact_phone,
         )
+         # Auto-send confirmation ONLY if we have a contact_email
+        if t.contact_email:
+            background.add_task(
+                send_ticket_created_email,
+                to_email=t.contact_email,
+                ticket_id=t.id,
+                category=t.category,
+                description=t.description,
+                status=t.status,      # your DB default is "Open"
+                submitted_at=t.created_at,      # <-- Date Submitted from DB
+                # city=None  # omit to use CITY_NAME env
+            )
+
         return CreateTicketResponse(ticket_id=t.id, status=t.status, eta_days=t.eta_days)
     finally:
         db.close()
