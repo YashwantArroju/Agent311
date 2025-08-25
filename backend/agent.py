@@ -38,16 +38,6 @@ except FileNotFoundError as e:
         "Create config/categories.yaml (see examples we discussed)."
     ) from e
 
-# (Optional) tiny validation maps — useful only to sanity-check LLM outputs later.
-# They don't classify; they just tell you what keys exist and what's required.
-#_CATS = yaml.safe_load(CATS_YAML_TEXT) or []
-#CATEGORY_KEYS = {row.get("key") for row in _CATS if isinstance(row, dict) and row.get("key")}
-#REQUIRED_BY_KEY = {
-#    row["key"]: (row.get("required_fields") or row.get("required") or [])
-#    for row in _CATS
-#    if isinstance(row, dict) and row.get("key")
-#}
-
 # ===================== Emergency detection =====================
 EMERGENCY_REGEX = r"(heart attack|gun|shots fired|fire in (my|the)|unconscious|not breathing|domestic violence|break[- ]?in|armed|stabbed|car crash with injuries)"
 def is_emergency(text: str) -> bool:
@@ -101,7 +91,7 @@ STATUS
 - Otherwise, ask briefly for the ticket ID.
 
 KB
-- For service questions (missed trash, pothole, streetlight, noise etc.), call search_kb_tool.
+- For service questions (missed trash, pothole, streetlight, noise etc.), you MUST call search_kb_tool with the user’s exact text. Do NOT answer from your own knowledge.
 - Give a concise, general answer. Then IMMEDIATELY offer to create a ticket.
 - If the user agrees (e.g., “yes”, “please do”, “create it”), PROCEED to collect ONLY the four fields and CALL create_ticket_tool. Do NOT re-ask already provided info. Do NOT loop.
 

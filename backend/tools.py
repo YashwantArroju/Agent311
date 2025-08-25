@@ -130,7 +130,7 @@ _FAQ = [
     {
         "q": "streetlight",
         "a": (
-            "For a streetlight outage, include the nearest address/intersection (and pole number if visible). "
+            "For a streetlight outage, it generally takes 3-5 bussiness days to fix. "
             "I can create a ticket for you now."
         ),
     },

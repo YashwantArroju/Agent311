@@ -14,11 +14,6 @@ warnings.filterwarnings(
 import streamlit as st
 from backend.agent import build_agent, is_emergency
 
-# In LLM-only mode, app.py doesn't use API_BASE directly (the agent/tools do).
-# If you want, leave the env loader above and pull API_BASE, but it's unused here.
-# API_BASE = os.getenv("API_BASE", "http://localhost:8011")
-# API_BASE = "http://localhost:8011"  # ❌ not needed in LLM-only path
-
 # -------------------- Config --------------------
 st.set_page_config(page_title="CityAssist 311", page_icon="🏙️", layout="centered")
 st.title("CityAssist 311 🏙️")

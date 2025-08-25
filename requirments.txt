@@ -1,0 +1,22 @@
+# --- web framework ---
+fastapi>=0.115
+uvicorn>=0.30
+
+# --- data / db ---
+SQLAlchemy>=2.0
+pydantic>=2.6
+email-validator>=2.0      # needed for pydantic EmailStr
+python-dotenv>=1.0
+PyYAML>=6.0               # for config/categories.yaml
+
+# --- http / utils ---
+requests>=2.32
+
+# --- LangChain + OpenAI driver (your agent.py imports) ---
+langchain>=0.2
+langchain-openai>=0.1
+
+# --- Gmail API (service account + DWD) ---
+google-auth>=2.30
+google-api-python-client>=2.130
+google-auth-httplib2>=0.2.0
