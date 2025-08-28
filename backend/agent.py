@@ -113,10 +113,16 @@ CATEGORIES_YAML:
 def build_agent():
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     tools = [create_ticket_tool, get_ticket_status_tool, search_kb_tool]
+     # 👇 Add conversation memory so the model can collect fields over multiple turns
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        return_messages=True,
+    )    
     agent = initialize_agent(
         tools,
         llm,
         agent=AgentType.OPENAI_FUNCTIONS,
+        memory=memory, 
         verbose=False,
         handle_parsing_errors=True,
         agent_kwargs={"system_message": SystemMessage(content=SYSTEM_PROMPT)},

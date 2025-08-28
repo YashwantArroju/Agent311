@@ -2,7 +2,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from .email import send_ticket_created_email
 
@@ -72,12 +72,16 @@ def get_ticket_status(req: StatusRequest):
         t = db_get_ticket(db, req.ticket_id)
         if not t:
             raise HTTPException(status_code=404, detail="Ticket not found")
+        
+         # --- compute ETA remaining based on creation date (calendar days) ---
+        days_elapsed = max(0, (datetime.utcnow().date() - t.created_at.date()).days)
+        eta_remaining = max(0, (t.eta_days or 0) - days_elapsed)
         # Only the fields in StatusResponse will be returned (others are ignored by response_model)
         return {
             "ticket_id": t.id,
             "status": t.status,
             "status_description": t.status_description,  # <- note surfaces here
-            "eta_days": t.eta_days,
+            "eta_days": eta_remaining,      # <= dynamic ETA shown here
             "dept": t.dept,
             "updated_at": t.updated_at,
             # extras (kept here for convenience; filtered out by response_model)
