@@ -1,13 +1,37 @@
 # backend/tools.py
-from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from .email import send_ticket_created_email
+import traceback
+import json 
+from .db_core import TicketEvent
+
+
 
 
 app = FastAPI(title="311 Tools (DB-backed)")
+
+#helper to find email success/failure
+def _send_email_background(*, to_email: str, ticket_id: str, category: str,
+                           description: str, status: str, created_at: datetime,
+                           from_user: str | None = None):
+    try:
+        # local import to avoid reload races
+        from .email import send_ticket_created_email
+        res = send_ticket_created_email(
+            to_email=to_email,
+            ticket_id=ticket_id,
+            category=category,
+            description=description,
+            status=status,
+            submitted_at=created_at,
+        )
+        print(f"[EMAIL OK] ticket={ticket_id} to={res.get('to')} from={res.get('from')} msgId={res.get('messageId')}")
+    except Exception as e:
+        print(f"[EMAIL ERR] ticket={ticket_id}: {e}")
+        traceback.print_exc()
 
 # -------------------- DB IMPORTS (single-file core) --------------------
 from .db_core import (
@@ -33,11 +57,18 @@ class StatusResponse(BaseModel):
     dept: Optional[str] = None
     updated_at: datetime
 
+class SendConfirmationRequest(BaseModel):
+    ticket_id: str
+
 # -------------------- Ticket endpoints --------------------
 @app.post("/create_ticket", response_model=CreateTicketResponse)
 def create_ticket(req: CreateTicketRequest, background: BackgroundTasks):
     db = SessionLocal()
     try:
+         # (redundant once schema required, but nice error if someone bypasses)
+        if not req.contact_email:
+            raise HTTPException(status_code=400, detail="contact_email is required")
+        
         t = db_create_ticket(
             db,
             category=req.category,
@@ -49,7 +80,7 @@ def create_ticket(req: CreateTicketRequest, background: BackgroundTasks):
             contact_phone=req.contact_phone,
         )
          # Auto-send confirmation ONLY if we have a contact_email
-        if t.contact_email:
+        '''if t.contact_email:
             background.add_task(
                 send_ticket_created_email,
                 to_email=t.contact_email,
@@ -60,6 +91,17 @@ def create_ticket(req: CreateTicketRequest, background: BackgroundTasks):
                 submitted_at=t.created_at,      # <-- Date Submitted from DB
                 # city=None  # omit to use CITY_NAME env
             )
+        # Always enqueue (email is guaranteed by schema)
+        background.add_task(
+            _send_email_background,
+            to_email=t.contact_email,
+            ticket_id=t.id,
+            category=t.category,
+            description=t.description,
+            status=t.status,
+            created_at=t.created_at,
+            #from_user="AiAgent@lightningminds.com",  # uncomment to lock sender
+        )'''
 
         return CreateTicketResponse(ticket_id=t.id, status=t.status, eta_days=t.eta_days)
     finally:
@@ -111,6 +153,57 @@ def update_ticket_status(req: UpdateStatusRequest):
     finally:
         db.close()
 
+@app.post("/send_confirmation")
+def send_confirmation(req: SendConfirmationRequest):
+    db = SessionLocal()
+    try:
+        t = db_get_ticket(db, req.ticket_id)
+        if not t:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        if not t.contact_email:
+            raise HTTPException(status_code=400, detail="Ticket has no contact_email")
+
+        # Idempotency: has a confirmation already been sent?
+        already = any(ev.event_type == "email_sent" for ev in t.events)
+        if already:
+            return {"ok": True, "already_sent": True, "ticket_id": t.id}
+
+        # Send now (synchronously so the tool gets immediate success/failure)
+        from .email import send_ticket_created_email
+        res = send_ticket_created_email(
+            to_email=t.contact_email,
+            ticket_id=t.id,
+            category=t.category,
+            description=t.description,
+            status=(t.status or "Open"),
+            submitted_at=t.created_at,
+        )
+
+        # Record the send
+        db.add(TicketEvent(
+            ticket_id=t.id,
+            event_type="email_sent",
+            payload=json.dumps({"messageId": res.get("messageId")})
+        ))
+        db.commit()
+
+        return {
+            "ok": True,
+            "already_sent": False,
+            "ticket_id": t.id,
+            "to": res.get("to"),
+            "from": res.get("from"),
+            "messageId": res.get("messageId"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Surface any Gmail/API error to the caller
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"email_send_failed: {e}")
+    finally:
+        db.close()
+
 # -------------------- Knowledge base (FAQs) --------------------
 class KBQuery(BaseModel):
     query: str
@@ -134,7 +227,7 @@ _FAQ = [
     {
         "q": "streetlight",
         "a": (
-            "For a streetlight outage, it generally takes 3-5 bussiness days to fix. "
+            "For a streetlight outage, it generally takes 3-5 business days to fix. "
             "I can create a ticket for you now."
         ),
     },

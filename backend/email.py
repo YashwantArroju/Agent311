@@ -83,7 +83,8 @@ def send_email_sa(
     msg = MIMEText(text_body, _subtype="plain", _charset="utf-8")
     msg["to"] = recipient
     msg["subject"] = subject
-    msg["from"] = IMPERSONATE_USER
+    from_header = f"{CITY_NAME} 311 Team <{IMPERSONATE_USER}>"
+    msg["from"] = from_header
     if reply_to:
         msg["Reply-To"] = reply_to
 
@@ -92,7 +93,7 @@ def send_email_sa(
     return {
         "messageId": res.get("id"),
         "to": recipient,
-        "from": IMPERSONATE_USER,
+        "from": from_header,
         "subject": subject,
     }
 

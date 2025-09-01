@@ -70,7 +70,7 @@ class CreateTicketRequest(BaseModel):
     address: str
     lat: Optional[float] = None
     lon: Optional[float] = None
-    contact_email: Optional[EmailStr] = None
+    contact_email: EmailStr
     contact_phone: Optional[str] = None
 
 class CreateTicketResponse(BaseModel):

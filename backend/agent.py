@@ -22,6 +22,9 @@ from langchain_openai import ChatOpenAI
 from langchain.tools import tool
 from langchain.agents import initialize_agent, AgentType
 from langchain.schema import SystemMessage
+from langchain.memory import ConversationBufferMemory
+from langchain.prompts import MessagesPlaceholder
+
 
 # ===================== Env / Config =====================
 load_dotenv()
@@ -44,10 +47,16 @@ def is_emergency(text: str) -> bool:
     return bool(re.search(EMERGENCY_REGEX, text or "", re.IGNORECASE))
 
 # ===================== Tools (FastAPI) =====================
+EMAIL_RE = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+
 @tool
 def create_ticket_tool(category: str, description: str, address: str = "", contact_email: str = "") -> str:
     """Create a city service ticket. CALL THIS IMMEDIATELY once you have all four fields:
     category, description, address, contact_email. Do not ask for any other fields. Returns JSON with ticket_id/status/eta_days."""
+    
+    if not contact_email or not re.search(EMAIL_RE, contact_email):
+        return "ERROR: contact_email_missing_or_invalid. Ask for a valid email and call this tool again."
+
     payload = {
         "category": category,
         "description": description,
@@ -70,6 +79,12 @@ def search_kb_tool(query: str) -> str:
     r = requests.post(f"{API_BASE}/search_kb", json={"query": query}, timeout=10)
     return r.text
 
+@tool
+def send_confirmation_tool(ticket_id: str) -> str:
+    """Send the confirmation email for an existing ticket_id (idempotent; safe to call once)."""
+    r = requests.post(f"{API_BASE}/send_confirmation", json={"ticket_id": ticket_id}, timeout=10)
+    return r.text
+
 # ===================== System Prompt (includes YAML) =====================
 SYSTEM_PROMPT = f"""
 You are CityAssist, a generic 311-style non-emergency assistant.
@@ -79,12 +94,14 @@ INTENTS → TOOLS
 - Check ticket status → call get_ticket_status_tool
 - Ask about city services → call search_kb_tool
 
-REPORTING (EMAIL ONLY)
-- To create ANY ticket, collect exactly these four fields: Category, Description, Location (address or landmark), and Contact Email.
-- Location can be ANY location string; do not block on perfect addresses.
-- If the user has provided all four, you MUST call create_ticket_tool. Do not ask for a phone number.
-- If something is missing, ask ONLY for the missing pieces in one brief question (prioritize asking for the email if it's missing).
-- After creating a ticket, return ticket_id and ETA.
+REPORTING
+- To create ANY ticket, collect exactly following four fields one at a time.
+- First ask for Category,
+- Then ask for Description, Description can be ANY description string; do not block on perfect wording.
+- Next ask for Location (address or landmark), Location can be ANY location string; do not block on perfect addresses.
+- Finally, ask for Contact Email.
+- If the user has provided all four, you MUST call create_ticket_tool and send_confirmation_tool.
+- After creating a ticket, return ticket_id and ETA.A confirmation email was sent to {{contact_email}}.
 
 STATUS
 - If a ticket ID (8 characters) is present, call get_ticket_status_tool and summarize status/ETA/department.
@@ -112,7 +129,7 @@ CATEGORIES_YAML:
 
 def build_agent():
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    tools = [create_ticket_tool, get_ticket_status_tool, search_kb_tool]
+    tools = [create_ticket_tool, get_ticket_status_tool, search_kb_tool, send_confirmation_tool]
      # 👇 Add conversation memory so the model can collect fields over multiple turns
     memory = ConversationBufferMemory(
         memory_key="chat_history",
@@ -125,7 +142,10 @@ def build_agent():
         memory=memory, 
         verbose=False,
         handle_parsing_errors=True,
-        agent_kwargs={"system_message": SystemMessage(content=SYSTEM_PROMPT)},
+        agent_kwargs={"system_message": SystemMessage(content=SYSTEM_PROMPT),
+                       # <- CRUCIAL: include the conversation in the agent’s prompt
+                       "extra_prompt_messages": [MessagesPlaceholder(variable_name="chat_history")],
+                       },
     )
     return agent
 
