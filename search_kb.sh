@@ -1,0 +1,1 @@
+sam local invoke SearchKb --event search_kb_event.json --docker-network sam-local-network

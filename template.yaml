@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM template for testing Lambda with local DynamoDB
+
+Resources:
+  Tickets:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: tickets
+      PrimaryKey:
+        Name: ticket_id
+        Type: String
+
+  CreateTicket:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: create_ticket
+      CodeUri: . # Assumes your code is in the root directory
+      Handler: create_ticket.handler
+      Runtime: python3.9
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref tickets
+      Environment:
+        Variables:
+          # DYNAMODB_ENDPOINT: http://host.docker.internal:8000
+          TABLE_NAME: tickets
+          # TABLE_NAME: !Ref tickets
+          # # This variable will be overridden for local testing
+          DYNAMODB_ENDPOINT: http://dynamodb-local:8000 # Default to empty for deployment
+
+  GetTicketStatus:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: get_ticket_status
+      CodeUri: . # Assumes your code is in the root directory
+      Handler: get_ticket_status.handler
+      Runtime: python3.9
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ticket_events
+      Environment:
+        Variables:
+          TABLE_NAME: ticket_events
+          DYNAMODB_ENDPOINT: http://dynamodb-local:8000 # Default to empty for deployment
+
+  SearchKb:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: search_kb
+      CodeUri: . # Assumes your code is in the root directory
+      Handler: search_kb.handler
+      Runtime: python3.9

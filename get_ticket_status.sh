@@ -1,0 +1,1 @@
+sam local invoke GetTicketStatus --event get_ticket_status_event.json --env-vars env.json --docker-network sam-local-network

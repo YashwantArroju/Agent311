@@ -1,4 +1,3 @@
-# Old create_ticket
 import os
 import boto3
 import json
@@ -19,21 +18,33 @@ dynamodb = boto3.resource(
 TABLE_NAME = os.environ.get('TABLE_NAME', 'tickets')
 table = dynamodb.Table(TABLE_NAME)
 
-def handler(event, context):
+def create_ticket(
+    address: str = None, category: str = None, description: str = None, contact_email: str = None
+) -> str:
     """
-    Creates a new ticket object in the DynamoDB table.
+    Creates a new support ticket.
+
+    Args:
+        address (str, required): Address/location of the issue.
+        category (str, required): Category to which the issue belongs.
+        description (str, required): Description of the issue.
+        contact_email (str, required): Contact email of the person reporting the issue.
+
+    Returns:
+        str: Ticket ID.
+
     """
+    # Raises:
+        # ClientError: If there's an issue with DynamoDB operations.
+        # ValueError: If a required argument is missing, or invalid format.
     
     # Extract ticket details from the incoming event
     ticket_id = str(uuid.uuid4())   # event.get('id')  # Using uuid to generate unique IDs
     
-    address = event.get('address')
-    category = event.get('category')
-    dept = event.get('dept')
-    description = event.get('description')
-    contact_email = event.get('contact_email')
-    # created_at = time.time()
-    created_at = '02/02/2025' # Gets seconds since epoch
+    
+    dept = "sanitation"
+    
+    created_at = time.time()        # Gets seconds since epoch
     eta_days = 5                    # Default value for now
     status = "open"                 # Default value
 
