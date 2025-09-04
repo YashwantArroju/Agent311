@@ -1,0 +1,24 @@
+# config/categories.yaml
+- key: pothole
+  detect: ["pothole", "road hole", "street crater"]
+  required_fields: ["category", "description", "location", "contact_email"]
+
+- key: streetlight
+  detect: ["streetlight", "street light", "lamp post", "light pole", "streetlight out"]
+  required_fields: ["category", "description", "location", "contact_email"]
+
+- key: missed_trash
+  detect: ["missed trash", "garbage not collected", "bin still full"]
+  required_fields: ["category", "description", "location", "contact_email"]
+
+- key: noise
+  detect: ["noise", "loud party", "construction noise", "noise complaint"]
+  required_fields: ["category", "description", "location", "contact_email"]
+
+- key: bulk_pickup
+  detect: ["bulk pickup", "sofa", "mattress", "appliance pickup"]
+  required_fields: ["category", "description", "location", "contact_email"]
+
+- key: graffiti
+  detect: ["graffiti", "tagging", "spray paint"]
+  required_fields: ["category", "description", "location", "contact_email"]

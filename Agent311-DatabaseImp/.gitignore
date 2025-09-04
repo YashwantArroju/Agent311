@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+*.log
+
+# Virtual env
+.venv/
+venv/
+ENV/
+
+# Streamlit
+.streamlit/
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local env + local data
+.env
+*.db
+tickets.db
+
+# Build/test
+dist/
+build/
+.pytest_cache/
+.coverage
+
+# --- SQLite artifacts
+backend/tickets.db
+backend/tickets.db-*
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+
+backend/credentials/*.json
