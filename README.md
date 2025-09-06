@@ -1,3 +1,4 @@
+Steps:
 - Setup AWS 
 - Made our accounts
 - Setup IAM permissions (default Admin permissions for everyone)
