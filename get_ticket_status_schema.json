@@ -1,0 +1,64 @@
+{
+    "name": "get_ticket_status",
+    "description": "Retrieve the current status and details of a 311 ticket",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "ticket_id": {
+                "type": "string",
+                "description": "Unique identifier of the ticket to retrieve"
+            }
+        },
+        "required": [
+            "ticket_id"
+        ],
+        "additionalProperties": false
+    },
+    "outputSchema": {
+        "type": "object",
+        "properties": {
+            "ticket_id": {
+                "type": "string",
+                "description": "Unique identifier of the ticket"
+            },
+            "status": {
+                "type": "string",
+                "description": "Current status of the ticket (e.g., Open, Closed)"
+            },
+            "dept": {
+                "type": "string",
+                "description": "Department handling the ticket"
+            },
+            "eta_days": {
+                "type": "integer",
+                "description": "Estimated number of days remaining until resolution"
+            },
+            "updated_at": {
+                "type": "string",
+                "description": "Timestamp of the last update in ISO 8601 format"
+            },
+            "category": {
+                "type": "string",
+                "description": "Category of the reported issue"
+            },
+            "description": {
+                "type": "string",
+                "description": "Detailed description of the reported issue"
+            },
+            "status_description": {
+                "type": "string",
+                "description": "Additional details about the ticket's status"
+            },
+            "error": {
+                "type": "string",
+                "description": "Error message if the request fails"
+            }
+        },
+        "required": [
+            "ticket_id",
+            "status",
+            "eta_days"
+        ],
+        "additionalProperties": false
+    }
+}

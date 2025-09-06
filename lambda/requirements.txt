@@ -1,5 +1,4 @@
 boto3
-streamlit
 google-api-python-client
 google-auth
 google-auth-httplib2

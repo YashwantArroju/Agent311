@@ -1,0 +1,34 @@
+{
+  "name": "search_faq",
+  "description": "Search the city FAQ knowledge base for common issues like potholes, missed trash, or noise complaints",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Keyword (e.g., 'missed trash', 'pothole')"
+      }
+    },
+    "required": ["query"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "answer": {
+        "type": ["string", "null"],
+        "description": "Answer from the FAQ knowledge base if a match is found, otherwise null"
+      },
+      "source": {
+        "type": ["string", "null"],
+        "description": "Source of the answer (e.g., 'Generic FAQs'), or null if not found"
+      },
+      "error": {
+        "type": "string",
+        "description": "Error message if the request fails"
+      }
+    },
+    "required": ["answer", "source"],
+    "additionalProperties": false
+  }
+}

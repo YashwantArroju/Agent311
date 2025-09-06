@@ -1,0 +1,60 @@
+{
+    "name": "create_ticket",
+    "description": "Create a new 311 ticket in DynamoDB via Lambda",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "category": {
+                "type": "string",
+                "description": "Category of the issue (e.g., pothole, streetlight, graffiti)"
+            },
+            "description": {
+                "type": "string",
+                "description": "Detailed description of the issue"
+            },
+            "address": {
+                "type": "string",
+                "description": "Street address where the issue is located"
+            },
+            "contact_email": {
+                "type": "string",
+                "format": "email",
+                "description": "Email address of the reporting citizen"
+            }
+        },
+        "required": [
+            "category",
+            "description",
+            "address",
+            "contact_email"
+        ],
+        "additionalProperties": false
+    },
+    "outputSchema": {
+        "type": "object",
+        "properties": {
+            "ticket_id": {
+                "type": "string",
+                "description": "Unique identifier for the created ticket"
+            },
+            "status": {
+                "type": "string",
+                "description": "Initial status of the ticket (usually 'Open')"
+            },
+            "eta_days": {
+                "type": "integer",
+                "description": "Estimated number of days until resolution"
+            },
+            "error": {
+                "type": "string",
+                "description": "Error message if creation fails"
+            }
+        },
+        "required": [
+            "ticket_id",
+            "status",
+            "eta_days"
+        ],
+        "additionalProperties": false
+    }
+}

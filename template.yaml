@@ -1,54 +1,81 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  SAM template for testing Lambda with local DynamoDB
+  Ticket management application
+
+# Parameters allow you to input your existing table names during deployment.
+# Parameters:
+#   TicketsTableName:
+#     Type: String
+#     Description: The name of the DynamoDB table for tickets.
+#     Default: tickets
 
 Resources:
-  Tickets:
-    Type: AWS::Serverless::SimpleTable
+  TicketsTable:
+    Type: AWS::DynamoDB::Table
+    # Type: AWS::Serverless::SimpleTable
     Properties:
       TableName: tickets
-      PrimaryKey:
-        Name: ticket_id
-        Type: String
+      AttributeDefinitions:
+        - AttributeName: ticket_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ticket_id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
 
   CreateTicket:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: create_ticket
-      CodeUri: . # Assumes your code is in the root directory
+      CodeUri: lambda/ # Assumes your code is in the root directory
       Handler: create_ticket.handler
-      Runtime: python3.9
+      Runtime: python3.13
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref tickets
+            TableName: !Ref TicketsTable
       Environment:
         Variables:
-          # DYNAMODB_ENDPOINT: http://host.docker.internal:8000
-          TABLE_NAME: tickets
+          TABLE_NAME: !Ref TicketsTable # Change this
           # TABLE_NAME: !Ref tickets
           # # This variable will be overridden for local testing
-          DYNAMODB_ENDPOINT: http://dynamodb-local:8000 # Default to empty for deployment
+          # DYNAMODB_ENDPOINT: "" # Default to empty for deployment
 
   GetTicketStatus:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: get_ticket_status
-      CodeUri: . # Assumes your code is in the root directory
+      CodeUri: lambda/ # Assumes your code is in the root directory
       Handler: get_ticket_status.handler
-      Runtime: python3.9
+      Runtime: python3.13
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref ticket_events
+            TableName: !Ref TicketsTable
       Environment:
         Variables:
-          TABLE_NAME: ticket_events
-          DYNAMODB_ENDPOINT: http://dynamodb-local:8000 # Default to empty for deployment
+          TABLE_NAME: !Ref TicketsTable
+          # DYNAMODB_ENDPOINT: "" # Default to empty for deployment
 
   SearchKb:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: search_kb
-      CodeUri: . # Assumes your code is in the root directory
+      CodeUri: lambda/ # Assumes your code is in the root directory
       Handler: search_kb.handler
-      Runtime: python3.9
+      Runtime: python3.13
+
+  SendEmail:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: send_email
+      CodeUri: lambda/ # Assumes your code is in the root directory
+      Handler: send_email.handler
+      Runtime: python3.13
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: arn:aws:secretsmanager:us-east-1:356225522107:secret:app/311/gmail/service_account.json-Adupbn
+      Environment:
+        Variables:
+          GMAIL_IMPERSONATE: "aiagent@lightningminds.com"
+          CITY_NAME: "Cityville"
+          
