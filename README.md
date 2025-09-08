@@ -1,0 +1,39 @@
+Steps:
+- Setup AWS 
+- Made our accounts
+- Setup IAM permissions (default Admin permissions for everyone)
+- Made sure we could share resources
+- We went over the existing 311 project to see how to approach the port
+- Delegated work
+- We created and configured DynamoDB database
+- Setup the local environment to test out the DynamoDB and Lambda interactions
+  - AWS CLI
+  - AWS SAM CLI
+  - Docker
+  - Setup commands
+    - docker network create sam-local-network
+    - docker run -p 8000:8000 --network sam-local-network --name dynamodb-local -d amazon/dynamodb-local
+    - docker ps
+    - aws dynamodb list-tables --endpoint-url http://localhost:8000
+    - aws dynamodb create-table --cli-input-json file://tickets-create-schema.json --endpoint-url http://dynamodb-local:8000
+    - sam local invoke CreateTicket --event create_ticket_event.json --env-vars env.json --docker-network sam-local-network
+    - sam local invoke GetTicketStatus --event get_ticket_status_event.json --env-vars env.json --docker-network sam-local-network
+    - sam local invoke SearchKb --event search_kb_event.json --docker-network sam-local-network
+  
+- Built and deployed the DynamoDB table and Lambda functions 
+    - template.yaml specifies the deployment configuration (what databases and their structure, 
+      what lambda functions and what servies they're connected to for permissions, as well as any environment variables)
+    - Schema files are used to specify the input and output structure of the lambda functions to our Gateway 
+    - Requirements.txt file specifies the dependencies
+    - Deployment commands:
+        - sam build
+        - sam deploy --guided
+- Tested the Lambda functions on AWS
+- Created and configured the Gateway by adding the Lambda targets and their ARNs and input and output schemas
+  - Setup and configured the AWS MCP Inspector to connect to and test the Agentcore Gateway
+    - https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-using-inspector.html
+  - Use Cognito to get Access Token to be able to make calls to the Gateway
+    - curl -X POST https://my-domain-i22y6il8.auth.us-east-1.amazoncognito.com/oauth2/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials&client_id=44vf6rtqc4c34jtr0dpp2d7rrp&client_secret=1ds4rqgas7nl0r9pdj5lome5n4pvnolvv3qf1n4crq06d4nfl96u"
+- Created another Lambda function to connect to the Gmail library using service account
+  - Used Secrets Manager to store the service_account.json file for the Lambda function
+  - Configured permissions for Gateway to connect to this target
