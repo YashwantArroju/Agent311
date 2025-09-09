@@ -38,7 +38,7 @@ if prompt := st.chat_input("Enter your question or message:"):
     with st.chat_message("assistant"):
         
         # Use the persistent session ID
-        agent_runtime_arn = "arn:aws:bedrock-agentcore:us-east-1:356225522107:runtime/cityassistant_311_agent-mq57SuCJkk"
+        agent_runtime_arn = "arn:aws:bedrock-agentcore:us-east-1:356225522107:runtime/agent-nRXAew2YSX"
         
         try:
             placeholder = st.empty()
@@ -51,9 +51,20 @@ if prompt := st.chat_input("Enter your question or message:"):
                 payload=json.dumps({"prompt": prompt}).encode()
             )
             
-            response = agent_response["response"].read().decode("utf-8")
+            response = json.loads(agent_response["response"].read().decode("utf-8"))["response"]
+            
+            # print(type(response))
+            # print(response)
+            # st.write(type(response))
+            # st.write(response)
             
             st.markdown(response)
+            # Add assistant response to chat history
+            st.session_state.messages.append({"role": "assistant", "content": response})
+            
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+            
             
         #### Ignore this part, was trying to stream the response
             
@@ -74,10 +85,4 @@ if prompt := st.chat_input("Enter your question or message:"):
             # placeholder.markdown(streamed_text)
         
         ####
-            
-            # Add assistant response to chat history
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
             
