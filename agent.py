@@ -15,6 +15,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import tool
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain.memory import ConversationBufferMemory
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from pathlib import Path
@@ -41,17 +42,15 @@ print("Starting up...")
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
-    #     - list_memory_events
-    # You MUST always follow the guidelines below.
-    # <guidelines>
-    #     - You MUST call the list_memory_events tool at every turn to see if there is any relevant information that can help in completing the
-    #     current task.
-    # </guidelines>
 
-    # Greet the user and ask the user if they'd like to begin by reporting an issue, check ticket status, or any questions about city services. 
+        # - When information is partially provided, briefly confirm what you already have, list ONLY the missing fields, and ask for them one at a time.
 SYSTEM_PROMPT = """
     You are CityAssist, a helpful city 311-style non-emergency assistant for the city of Cityville. 
 	
+    CORE BEHAVIOR
+        - ALWAYS CHECK MEMORY/CHAT HISTORY TO SEE IF YOU HAVE THE INFORMATION YOU NEED ALREADY PROVIDED
+        - Never re-ask for information that is already present in the current user message OR in chat_history.
+ 
     You have access the following tools:
         - target-create-ticket___create_ticket
         - target-email___send_email
@@ -84,66 +83,10 @@ SYSTEM_PROMPT = """
 
 	GUARDRAILS
 	- If the message suggests an emergency, say: "Call 911 now." Do not call any tools.
-    - If you do not have the necessary information to process a request, politely ask them for the required information
-    - Never assume any parameter values while using tools.
  """
 
-    # - If you do not have the necessary information to process a request, politely ask them for the required information
-# SYSTEM_PROMPT = """
-#     You are CityAssist, a helpful city 311-style non-emergency assistant. 
-#     You have access the following tools:
-#         - list_memory_events
-#         - target-create-ticket___create_ticket
-#         - target-email___send_email
-#         - target-get-ticket-status___get_ticket_status
-#         - target-knowledge-base___search_kb
-#     You MUST always follow the rules below.
-    
-#     Start by greeting the user and asking the user if they'd like to begin by reporting an issue, asking for ticket status, or if they have a general query about city services. 
-#     You will ALWAYS follow the below general guidelines:
-    
-#     <guidelines>
-#         - Always maintain a professional and helpful tone
-#         - If the request suggests an emergency, respond: "Call 911 now." Do not call any tools.
-#     </guidelines>
-                
-#     You have access to tools to: create a ticket, send an email, get ticket status, search KB (knowledge base), and list_memory_events tool
-    
-#     1. You MUST call the list_memory_events tool and see if there is any relevant information that you can use to complete your current task.
-#     2. Use the following user intentions to decide which tools to call:
-#         INTENTS → TOOLS
-#         - Report an issue → call target-create-ticket___create_ticket and then target-email___send_email
-#         - Check ticket status → call target-get-ticket-status___get_ticket_status
-#         - Ask about city services → call target-knowledge-base___search_kb
-        
-#         REPORTING
-#         - To create ANY ticket, collect exactly following four fields one at a time.
-#         - First ask for Category,
-#         - Then ask for Description, Description can be ANY description string; do not block on perfect wording.
-#         - Next ask for Location (address or landmark), Location can be ANY location string; do not block on perfect addresses.
-#         - Finally, ask for Contact Email.
-#         - If the user has provided all four, you MUST call target-create-ticket___create_ticket and then target-email___send_email.
-#         - After creating a ticket, return ticket_id and ETA. A confirmation email was sent to {{contact_email}}.
-        
-#         STATUS
-#         - If a ticket ID (8 characters) is present, call target-get-ticket-status___get_ticket_status and summarize status/ETA/department.
-#         - Otherwise, ask briefly for the ticket ID.
-        
-#         KB
-#         - For service questions (missed trash, pothole, streetlight, noise etc.), you MUST call target-knowledge-base___search_kb with the user’s exact text. Do NOT answer from your own knowledge.
-#         - Give a concise, general answer. Then IMMEDIATELY offer to create a ticket.
-#         - If the user agrees (e.g., “yes”, “please do”, “create it”), PROCEED to collect ONLY the four fields and CALL create_ticket_tool. Do NOT re-ask already provided info. Do NOT loop.
-# """
-
-    # MEMORY CAPABILITIES:
-    # - You have access to conversational with the list_memory_events tool. You MUST call it at the start of every turn and see if there is any relevant information that you can use to complete your current task.
-
-
 MEMORY_ID = os.getenv("MEMORY_ID", "Memory311Agent-wZTZP0772X")
-# GATEWAY_URL = os.getenv("GATEWAY_URL", "https://gateway-311-qms0ja1vyr.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp")
-# GATEWAY_ACCESS_TOKEN = os.getenv("GATEWAY_ACCESS_TOKEN", "eyJraWQiOiJmN1lZV1ZIb05FaTBmMk9OcEE2akdtSSs2N3ZLTHE4TWRHbzM4RXY4V2NZPSIsImFsZyI6IlJTMjU2In0.eyJzdWIiOiI0NHZmNnJ0cWM0YzM0anRyMGRwcDJkN3JycCIsInRva2VuX3VzZSI6ImFjY2VzcyIsInNjb3BlIjoiR2F0ZXdheS0zMTFcL2dlbmVzaXMtZ2F0ZXdheTppbnZva2UiLCJhdXRoX3RpbWUiOjE3NTczMDA5MTYsImlzcyI6Imh0dHBzOlwvXC9jb2duaXRvLWlkcC51cy1lYXN0LTEuYW1hem9uYXdzLmNvbVwvdXMtZWFzdC0xX1hFNXM2NnZpTCIsImV4cCI6MTc1NzMwNDUxNiwiaWF0IjoxNzU3MzAwOTE2LCJ2ZXJzaW9uIjoyLCJqdGkiOiJkMzRhZjhiMC01NjEyLTQ1ZTItOGZlMC05ZGU1ZDc0MDJmMDciLCJjbGllbnRfaWQiOiI0NHZmNnJ0cWM0YzM0anRyMGRwcDJkN3JycCJ9.CQb9JjpuBJGgFeqY-P-nYoVVizRY2lAgy8DnJDpGzjvCCMvzFkkMAhOxkC6pa2-Mcyb90eqB_juho_2qL430DZPDemTxRlvgDC3PnsLSVu6fZa6WqYt2GR5AhFtjkCwf9Lu-WQvd3EYLTGMnXRd2-A8FTb2tJy38le8vdvYnt4_fBptmaH0d4sc8UA2svFykHRAlcawkJAZhLXWKwHHhXCKy5fphGYOKbzUy6J7qk2ImanC-Z4xZamn_q9UEMs3r9M2jm2OQu6fB3By8aNdWFxlYjpJ5WtIYMO0jkTeKbw_kUi-ckunJk9oLb-5ozvGcjLd0DHrn2wawrx7gcQTQGw")
 GATEWAY_SECRET_NAME = os.getenv("GATEWAY_SECRET_NAME", "agentcore/cityassist311/gateway")
-
 
 class Agent:
     
@@ -159,35 +102,6 @@ class Agent:
         self._token_expiry: float = 0.0
 
         
-    # You only need this if you don't already have a agentcore memory instance
-    def connect_to_memory_client(self):
-            
-            print("🔌 Creating memory client...")
-            self._memory_client = MemoryClient(region_name="us-east-1")
-        
-    def create_memory_instance(self) -> str:
-        try:
-            self._memory = self._memory_client.create_memory_and_wait(
-                name="Memory311Agent",
-                description="Conversational memory for 311 agent",
-                strategies=[],           # No memory strategies for short-term memory
-                event_expiry_days=7,     # Memories expire after 7 days
-                max_wait=300,            # Maximum time to wait for memory creation (5 minutes)
-                poll_interval=10         # Check status every 10 seconds
-                
-                ### Add for long-term memory later
-                # strategies=[{
-                #     "userPreferenceMemoryStrategy": {
-                #         "name": "UserPreference",
-                #         "namespaces": ["/users/{actorId}"]
-                #     }
-                # }]
-                ###
-            )
-            
-        except Exception as e:
-            print(f"❌ Failed to create memory instance: {e}")
-    
     # Returns memory ID of current memory instance
     def get_memory_instance_id(self) -> str:
         
@@ -209,7 +123,7 @@ class Agent:
         else:
             print(f"❌ Memory client not valid. Can't retrieve memory!")
         
-    # Get Gateway secrets
+        
     def _load_gateway_cfg(self) -> Dict[str, str]:
         env = {
             "gateway_url": os.getenv("GATEWAY_URL"),
@@ -284,75 +198,34 @@ class Agent:
         
         return tools
     
-    
-    async def cleanup(self):
-        """Properly clean up the session and streams."""
-        print("Cleaning up resources...")
-        if self._gateway_session_context:
-            await self._gateway_session_context.__aexit__(None, None, None)
-        if self._gateway_streams_context:
-            await self._gateway_streams_context.__aexit__(None, None, None)
-        print("Cleanup complete.")
-
-
-    async def create_agent(self, actor_id, session_id):
-        """Creates and configures the LangGraph agent."""
-        llm = ChatBedrock(
-            model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-            model_kwargs={"temperature": 0.0},
-        )
+    # You only need this if you don't already have a agentcore memory instance
+    def connect_to_memory_client(self):
+            print("🔌 Creating memory client...")
+            self._memory_client = MemoryClient(region_name="us-east-1")
         
-        
-        ### CONNECT TO MEMORY AND GET EVENTS AS A TOOL ###
+    def create_memory_instance(self) -> str:
+        try:
+            self._memory = self._memory_client.create_memory_and_wait(
+                name="Memory311Agent",
+                description="Conversational memory for 311 agent",
+                strategies=[],           # No memory strategies for short-term memory
+                event_expiry_days=7,     # Memories expire after 7 days
+                max_wait=300,            # Maximum time to wait for memory creation (5 minutes)
+                poll_interval=10         # Check status every 10 seconds
                 
-        # Get memories from the current region
-        if not self._memory_client: 
-            self.connect_to_memory_client()
-        
-        
-        # @tool
-        # def list_memory_events():
-        #     """Tool used to retrieve conversation. This must be used.""" 
-        #     print(f"\n\n\nMemoryID: {memory_id} \t\t ActorID: {actor_id} \t\t SessionID: {session_id}")
+                ### Add for long-term memory later
+                # strategies=[{
+                #     "userPreferenceMemoryStrategy": {
+                #         "name": "UserPreference",
+                #         "namespaces": ["/users/{actorId}"]
+                #     }
+                # }]
+                ###
+            )
             
-        #     events = self._memory_client.list_events(
-        #             memory_id=memory_id,
-        #             actor_id=actor_id,
-        #             session_id=session_id,
-        #             max_results=10
-        #         )
-        #     print(f"Events in the list_memory_events tool: {events}")
-        #     return events
-        
-        ##################################################
-        
-        
-        ### CONNECT TO GATEWAY AND GET TOOLS ###
-        
-        # Get Gateway secrets
-        config = self._load_gateway_cfg()
-        access_token = self._fetch_access_token(config)
-
-        await self.connect_to_gateway(config, access_token)
-        gateway_tools = await self.get_tools()
-        
-        ########################################
-        
-        tools = gateway_tools
-        # tools = gateway_tools + [list_memory_events]
-
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", SYSTEM_PROMPT),
-                MessagesPlaceholder(variable_name="chat_history"),
-                ("human", "{{input}}"),
-                MessagesPlaceholder(variable_name="agent_scratchpad"),
-            ]
-        )
-        
-        agent = create_tool_calling_agent(llm, tools, prompt)
-        executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True)
-        return executor
+        except Exception as e:
+            print(f"❌ Failed to create memory instance: {e}")
+    
     
     def get_conversation(self, actor_id, session_id):
         if not self._memory_client: 
@@ -380,88 +253,131 @@ class Agent:
             messages=conversation
         )
 
-    # async def process_query(self, user_query: str, actor_id: str, session_id: str) -> str:
-    #     """Process a query using the agent for a specific conversation thread."""
+
+    async def create_agent(self, actor_id, session_id):
+        """Creates and configures the LangGraph agent."""
+        llm = ChatBedrock(
+            model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            model_kwargs={"temperature": 0.0},
+        )
         
-    #     # Get memory
-    #     past_events = self.get_conversation(actor_id=actor_id, session_id=session_id)
-    #     chat_history = []
-    #     if past_events:
-    #         for event in past_events:
-    #             # Assuming event is a tuple like ('user input', 'USER') or ('agent response', 'ASSISTANT')
-    #             message, sender = event
-    #             if sender == "USER":
-    #                 chat_history.append(HumanMessage(content=message))
-    #             elif sender == "ASSISTANT":
-    #                 chat_history.append(AIMessage(content=message))
+        ### GATEWAY AND TOOLS ###
         
-    #     # Initialize the agent
-    #     agent_executor = await self.create_agent(actor_id, session_id)
+        # Get Gateway secrets
+        config = self._load_gateway_cfg()
+        access_token = self._fetch_access_token(config)
+
+        # Connect to Gateway and get tool list 
+        await self.connect_to_gateway(config, access_token)
+        gateway_tools = await self.get_tools()
         
-    #     # Prepare user query for agent
-    #     # input = {"messages": [HumanMessage(content=user_query)]}
-    #     result = await agent_executor.ainvoke({
-    #         "input": user_query,
-    #         "chat_history": chat_history
-    #     })  
-    #     # Invoke the agent
-    #     # result = await agent_executor.ainvoke(input)
-    #     # print(result)
-    #     # result = final_state['messages'][-1].content
+        # Accumulate all tools (just gateway tools for now)
+        tools = gateway_tools
         
-    #     raw_response = result["output"]
+        #########################
         
-    #     response_text = ""
-    #     if isinstance(raw_response, list) and raw_response and isinstance(raw_response[0], dict) and "text" in raw_response[0]:
-    #         response_text = raw_response[0]["text"]
-    #     else:
-    #         # Fallback for when the output is already a string or another type.
-    #         response_text = str(raw_response)
+
+        ### MEMORY ###
         
-    #     # Save the memory
-    #     conversation = [
-    #         (user_query, "USER"),
-    #         (response_text, "ASSISTANT")
-    #     ]
-    #     self.save_conversation(actor_id=actor_id, session_id=session_id, conversation=conversation)
-        
-    #     # past_conversation = self.get_conversation(actor_id=actor_id, session_id=session_id)
-    #     # print(f"Past conversational events: {past_conversation}")
-    #     # print(f"\n\nCurrent conversation: {conversation}\n\n")
-        
-    #     return response_text
-    
-    async def process_query(self, user_query: str, actor_id: str, session_id: str) -> str:
-        """Process a query using the agent for a specific conversation thread."""
-        
-        # 1. Get previous conversation events from memory
+        # Connect to AgentCore Memory
         if not self._memory_client: 
             self.connect_to_memory_client()
             
+        # Get all events associated with this session
         past_events = self.get_conversation(actor_id=actor_id, session_id=session_id)
         
-        chat_history = []
+        # Create memory using chat history
+        print(f"Listing memory\n--------------\n")
+            
+        memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            return_messages=True
+        )
         
+        # Note: Let's try inserting it as i get it, if it's in the wrong order then i can reverse it later
+        # Note: Remove the memory from agent invocation
+        i=0
         if past_events:
-            for event in past_events:
+            print(f"PAST_EVENTS: {past_events}")
+            for event in reversed(past_events):
+                print(f"EVENT {i}: {event}")
                 if 'payload' in event:
+                    print(f"\n\n\nMessage turn {i}: ")
+                    i+=1
+                    print(f"\n\n--------------\nStarting Turn\n--------------\n\n")
+                    input = ""
+                    output = ""
                     for message_turn in event['payload']:
                         if 'conversational' in message_turn:
                             role = message_turn['conversational'].get('role')
                             content = message_turn['conversational'].get('content', {}).get('text', '')
-                            
                             if role == "USER":
-                                chat_history.append(HumanMessage(content=content))
+                                print(f"User said: {content}")
+                                input: str = content
                             elif role == "ASSISTANT":
-                                chat_history.append(AIMessage(content=content))
+                                print(f"Assistant said: {content}")
+                                output: str = content
+                                
+                    memory.save_context({"input": input}, {"output": output})
+                    print(f"\n\n--------------\nEnding Turn\n--------------\n\n")
+                            
+        # Inspect what's in memory. Take this out in prod.
+        print(f"Contents of ConversationBufferMemory: {memory.load_memory_variables({})}")
+        
+        ##############
+        
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", SYSTEM_PROMPT),
+                MessagesPlaceholder(variable_name="chat_history"),
+                ("human", "{input}"),
+                MessagesPlaceholder(variable_name="agent_scratchpad"),
+            ]
+        )
+        
+        agent = create_tool_calling_agent(llm, tools, prompt)
+        executor = AgentExecutor(
+            agent=agent, 
+            tools=tools, 
+            verbose=True, 
+            handle_parsing_errors=True,
+            memory=memory
+        )
+        return executor
+    
+    
+    async def process_query(self, user_query: str, actor_id: str, session_id: str) -> str:
+        """Process a query using the agent for a specific conversation thread."""
+        
+        # # 1. Get previous conversation events from memory
+        # if not self._memory_client: 
+        #     self.connect_to_memory_client()
+            
+        # past_events = self.get_conversation(actor_id=actor_id, session_id=session_id)
+        
+        # chat_history = []
+        # print(f"Listing memory\n--------------\n")
+        # if past_events:
+        #     for event in past_events:
+        #         if 'payload' in event:
+        #             for message_turn in event['payload']:
+        #                 if 'conversational' in message_turn:
+        #                     role = message_turn['conversational'].get('role')
+        #                     content = message_turn['conversational'].get('content', {}).get('text', '')
+                            
+        #                     if role == "USER":
+        #                         print(f"User said: {content}")
+        #                         chat_history.append(HumanMessage(content=content))
+        #                     elif role == "ASSISTANT":
+        #                         print(f"Assistant said: {content}")
+        #                         chat_history.append(AIMessage(content=content))
 
         # 2. Initialize the agent
         agent_executor = await self.create_agent(actor_id, session_id)
         
         # 3. Invoke the agent with current input AND past history
         result = await agent_executor.ainvoke({
-            "input": user_query,
-            "chat_history": chat_history
+            "input": user_query
         })
         print(f"RESULT: {result}")
         raw_response = result["output"]
@@ -485,6 +401,15 @@ class Agent:
         return response_text
 
         
+    async def cleanup(self):
+        """Properly clean up the session and streams."""
+        print("Cleaning up resources...")
+        if self._gateway_session_context:
+            await self._gateway_session_context.__aexit__(None, None, None)
+        if self._gateway_streams_context:
+            await self._gateway_streams_context.__aexit__(None, None, None)
+        print("Cleanup complete.")
+
 
 app = BedrockAgentCoreApp()
 
@@ -492,6 +417,8 @@ app = BedrockAgentCoreApp()
 async def agent_invocation(payload, context):
     
     print(f"Context: {context}")
+    
+    print(f"SessionId: {context.session_id}")
     
     print(f"Received payload: {payload}")
     
@@ -508,7 +435,7 @@ async def agent_invocation(payload, context):
         
         # Fallback for local testing or environments without a session_id
         if not session_id:
-            session_id = "default-session-id"
+            session_id = "default-session-id2"
 
         client = Agent()
         

@@ -11,11 +11,26 @@ if "user_id" not in st.session_state:
 
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
+    
+st.set_page_config(page_title="CityAssist Chat", layout="centered")
 
-# --- Streamlit UI ---
-st.set_page_config(page_title="Bedrock Agent Chat", layout="centered")
+st.title("💬 CityAssist Chat")
 
-st.title("💬 AWS Bedrock Agent Chat")
+# Initialize chat history with a welcome message
+if "messages" not in st.session_state:
+    welcome_message = """
+    Welcome to CityAssist, Cityville's 311 non-emergency service assistant! I'm here to help you with city-related issues and services.
+
+    How can I assist you today? Would you like to:
+
+    1. Report an issue (like potholes, graffiti, or missed trash collection)
+    2. Check the status of an existing ticket
+    3. Ask questions about city services
+    
+    Please let me know what you need help with, and I'll guide you through the process.
+    """
+    st.session_state.messages = [{"role": "assistant", "content": welcome_message}]
+
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -43,6 +58,9 @@ if prompt := st.chat_input("Enter your question or message:"):
         try:
             placeholder = st.empty()
             streamed_text = ""
+            
+            print(f"SessionId: {st.session_state.session_id}")
+            # st.write(f"SessionId: {st.session_state.session_id}")
             
             agent_response = client.invoke_agent_runtime(
                 agentRuntimeArn=agent_runtime_arn,
