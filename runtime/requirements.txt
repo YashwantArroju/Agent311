@@ -1,13 +1,13 @@
-langgraph
-fastapi
-nova-act
-langchain-aws
-langgraph
-langchain_community
-pyjwt>=2.10.1
-opentelemetry-instrumentation-langchain
 bedrock-agentcore
 bedrock-agentcore-starter-toolkit
-langchain_openai
+fastapi
+langchain_community
 langchain_mcp_adapters
+langchain_openai
+langchain-aws
+langgraph
+nova-act
+# opentelemetry-instrumentation-langchain
+opentelemetry-instrumentation-botocore
+pyjwt>=2.10.1
 requests

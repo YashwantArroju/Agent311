@@ -37,3 +37,10 @@ Steps:
 - Created another Lambda function to connect to the Gmail library using service account
   - Used Secrets Manager to store the service_account.json file for the Lambda function
   - Configured permissions for Gateway to connect to this target
+
+
+
+
+
+    agentcore configure -e agent.py
+    agentcore launch
