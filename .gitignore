@@ -31,3 +31,4 @@ dist/
 build/
 .pytest_cache/
 .coverage
+service_account.json
