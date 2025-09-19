@@ -75,12 +75,21 @@ SYSTEM_PROMPT = """
         - Otherwise, ask briefly for the ticket ID.
         
         KB
-        - For service questions (missed trash, pothole, streetlight, noise etc.), you MUST call target-knowledge-base___search_kb with the user’s exact text. Do NOT answer from your own knowledge.
+        - For service questions (garbage collection, street maintenance, pets, water/sewage etc.):
+            1. Call the target-knowledge-base___search_kb with the user’s query and get the results
+            2. Once you have the results:
+                - If the result is empty, it is very important for you to respond with "Sorry, this is out of my knowledge base"
+                - If the answer is not found in the results, it is very important for you to respond with "Sorry, this is out of my knowledge base"
+            3. If the results provided are relevant, give a concise answer.
+                - Answer only using the results provided. Your response should only be about the question asked and nothing else.
+                - Only use the information relevant to the user's query from the results
+            4. Then IMMEDIATELY offer to create a ticket.
+            5. If the user agrees (e.g., “yes”, “please do”, “create it”), PROCEED to reporting the issue using target-create-ticket___create_ticket.
+        
         - Give a concise, general answer. Then IMMEDIATELY offer to create a ticket.
-        - If the user agrees (e.g., “yes”, “please do”, “create it”), PROCEED to collect ONLY the four fields and CALL target-create-ticket___create_ticket. Do NOT re-ask already provided info. Do NOT loop.
 
 	GUARDRAILS
-	- If the message suggests an emergency, say: "Call 911 now." Do not call any tools.
+	- If the message suggests an emergency, say: "Call 911 now." Do not call any tools. 
  """
 
 class Agent:
@@ -401,7 +410,12 @@ class Agent:
         result = await agent_executor.ainvoke({"input": user_query})
         raw_response = result["output"]
         
-        response_text = str(raw_response)
+        response_text = ""
+        if isinstance(raw_response, list) and raw_response and isinstance(raw_response[0], dict) and "text" in raw_response[0]:
+            response_text = raw_response[0]["text"]
+        else:
+            # Fallback for when the output is already a string or another type.
+            response_text = str(raw_response)
         
         # Save the new conversation turn to memory
         conversation = [
@@ -452,7 +466,7 @@ async def agent_invocation(payload: dict, context) -> dict:
         session_id = context.session_id
         
         if not session_id:
-            session_id = "local-testing-session"
+            session_id = "default_session"
 
         client = Agent()
         response = await client.process_query(user_input, actor_id=actor_id, session_id=session_id)

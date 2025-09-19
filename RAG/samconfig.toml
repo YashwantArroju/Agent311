@@ -1,0 +1,10 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "RAG-Ingestion"
+resolve_s3 = true
+s3_prefix = "RAG-Ingestion"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "S3BucketName=\"cary-kb-source\" OpenSearchHost=\"266mw10z7j81zyo2a6a8.us-east-1.aoss.amazonaws.com\" IndexName=\"cityassist_rag\""
+image_repositories = []

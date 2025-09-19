@@ -1,0 +1,70 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  RAG Ingest Lambda – Extract text from PDFs in S3, chunk, embed with Bedrock, and index into OpenSearch Serverless.
+
+Globals:
+  Function:
+    Timeout: 900               # up to 15 minutes, for large PDFs
+    MemorySize: 1024
+    Runtime: python3.13
+    Architectures:
+      - x86_64
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: The S3 bucket where PDFs will be uploaded
+  OpenSearchHost:
+    Type: String
+    Description: OpenSearch Serverless collection endpoint (no https://, just host)
+  IndexName:
+    Type: String
+    Default: cityassist_rag
+    Description: Name of the OpenSearch index to store embeddings
+
+Resources:
+  RagIngestLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: rag-ingest-lambda
+      Handler: rag_ingest_lambda.handler
+      CodeUri: ./lambda_ingestion   # directory with rag_ingest_lambda.py
+      Environment:
+        Variables:
+          EMBEDDING_MODEL_ID: amazon.titan-embed-text-v1
+          OPENSEARCH_HOST: !Ref OpenSearchHost
+          INDEX_NAME: !Ref IndexName
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: "*" # optionally scope to Titan embed model ARN
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub arn:aws:s3:::${S3BucketName}/*
+            - Effect: Allow
+              Action:
+                - aoss:APIAccessAll   # or more granular aoss permissions
+              Resource: "*"
+
+  # Optional: Trigger Lambda automatically on S3 PDF uploads
+  S3TriggerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RagIngestLambda
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${S3BucketName}
+
+  S3Event:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt RagIngestLambda.Arn

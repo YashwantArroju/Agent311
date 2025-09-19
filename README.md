@@ -44,3 +44,17 @@ Steps:
 
     agentcore configure -e agent.py
     agentcore launch
+
+
+RAG
+- Accumulated source PDFs from City of Cary website
+- Uploaded to S3 bucket (or have SAM CLI create a bucket AND THEN upload the PDFs to the bucket)
+- Deploy (if you want to ingest PDFs on AWS) the RAG ingestion tool
+- Feed the PDFs along with their categories into the ingestion tool. We're using the Amazon Titan (titan-embed-text-v1) embedding model
+    - Fed through Lambda UI (testing tab)
+- This creates the Vector DB (index) inside AWS OpenSearch our collection
+- We used chunk size = 1500 and overlap = 200
+- Next we created the search_kb tool which will search the index using the query and retreive the top k results (k=5).
+- The user query is converted to embeddings using the Titan embedding model before searching.
+- A similarity score of 0.65 is used to ensure the results are relevant to the query.
+- The system prompt ensures the model only answers relevant user queries and only uses the results from the knowledge base.
